@@ -1,13 +1,13 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import cookieParser = require('cookie-parser');
 
 import { AppModule } from './app.module';
-import cookieParser = require('cookie-parser');
 import { isProduction } from './config/app-env';
 
-// добавить import-sort и начать делать модуль auth
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -40,6 +40,39 @@ async function bootstrap() {
       credentials: true,
       methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'X-CSRF-Token'],
+    });
+  }
+
+  if (!isProduction(configService)) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('RIFT API')
+      .setDescription('RIFT backend HTTP API')
+      .setVersion('1.0.0')
+      .addTag('Authentication', 'Registration, login, and session renewal')
+      .addTag('Users', 'Current user and active sessions')
+      .addTag('Health', 'Service health checks')
+      .addCookieAuth(
+        'rift_access',
+        {
+          type: 'apiKey',
+          description:
+            'Access JWT is set by POST /auth/login or POST /auth/register.',
+        },
+        'accessCookie',
+      )
+      .build();
+
+    const document = SwaggerModule.createDocument(app, swaggerConfig, {
+      operationIdFactory: (controller, method) => `${controller}_${method}`,
+    });
+
+    SwaggerModule.setup('docs', app, document, {
+      useGlobalPrefix: true,
+      customSiteTitle: 'RIFT API Docs',
+      swaggerOptions: {
+        displayOperationId: true,
+        persistAuthorization: true,
+      },
     });
   }
 

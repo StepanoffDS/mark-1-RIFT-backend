@@ -12,6 +12,18 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  ApiBadRequestResponse,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiHeader,
+  ApiNoContentResponse,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { getRefreshSessionTtlMs, isProduction } from 'src/config/app-env';
@@ -20,11 +32,13 @@ import { RequestWithCookies } from 'src/config/types';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UserResponseDto } from './dto/response.dto';
 import { CsrfGuard } from './guards/csrf.guard';
 import { getAuthCookieName } from './lib/auth-cookie';
 import { AuthCookie, type Credentials } from './types';
 
 @UseGuards(CsrfGuard)
+@ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -34,6 +48,8 @@ export class AuthController {
 
   @Get('csrf')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Set a CSRF cookie' })
+  @ApiNoContentResponse({ description: 'CSRF cookie was set.' })
   csrf(@Res({ passthrough: true }) response: Response) {
     this.setCsrfCookie(response);
   }
@@ -41,6 +57,23 @@ export class AuthController {
   @Post('register')
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 3, ttl: 3_600_000 } })
+  @ApiOperation({ summary: 'Register and start a session' })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    required: true,
+    description: 'Value of the readable rift_csrf cookie.',
+  })
+  @ApiCreatedResponse({
+    type: UserResponseDto,
+    description: 'User created. Sets access, refresh, and CSRF cookies.',
+  })
+  @ApiBadRequestResponse({ description: 'Request body is invalid.' })
+  @ApiConflictResponse({ description: 'Email or username is already in use.' })
+  @ApiForbiddenResponse({ description: 'CSRF token or Origin is invalid.' })
+  @ApiResponse({
+    status: 429,
+    description: 'Registration rate limit exceeded.',
+  })
   async register(
     @Body() dto: RegisterDto,
     @Req() request: RequestWithCookies,
@@ -60,6 +93,20 @@ export class AuthController {
   @Post('login')
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
+  @ApiOperation({ summary: 'Log in and start a session' })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    required: true,
+    description: 'Value of the readable rift_csrf cookie.',
+  })
+  @ApiCreatedResponse({
+    type: UserResponseDto,
+    description: 'User authenticated. Sets access, refresh, and CSRF cookies.',
+  })
+  @ApiBadRequestResponse({ description: 'Request body is invalid.' })
+  @ApiUnauthorizedResponse({ description: 'Email or password is invalid.' })
+  @ApiForbiddenResponse({ description: 'CSRF token or Origin is invalid.' })
+  @ApiResponse({ status: 429, description: 'Login rate limit exceeded.' })
   async login(
     @Body() dto: LoginDto,
     @Req() request: RequestWithCookies,
@@ -79,6 +126,22 @@ export class AuthController {
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Rotate the refresh token and issue a new access token',
+  })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    required: true,
+    description: 'Value of the readable rift_csrf cookie.',
+  })
+  @ApiNoContentResponse({
+    description: 'Access, refresh, and CSRF cookies were rotated.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Refresh session is invalid, expired, or revoked.',
+  })
+  @ApiForbiddenResponse({ description: 'CSRF token or Origin is invalid.' })
+  @ApiResponse({ status: 429, description: 'Refresh rate limit exceeded.' })
   async refresh(
     @Req() request: RequestWithCookies,
     @Res({ passthrough: true }) response: Response,
@@ -96,6 +159,15 @@ export class AuthController {
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Log out from the current session' })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    required: true,
+    description: 'Value of the readable rift_csrf cookie.',
+  })
+  @ApiNoContentResponse({ description: 'Current cookies were cleared.' })
+  @ApiForbiddenResponse({ description: 'CSRF token or Origin is invalid.' })
+  @ApiResponse({ status: 429, description: 'Logout rate limit exceeded.' })
   async logout(
     @Req() request: RequestWithCookies,
     @Res({ passthrough: true }) response: Response,
