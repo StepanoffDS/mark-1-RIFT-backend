@@ -12,8 +12,8 @@ API разделяется на HTTP API и Socket.IO events.
 
 # Auth
 
-Полный lifecycle credentials, refresh rotation, CSRF и cookie attributes:
-[auth.md](auth.md).
+Frontend flow, CSRF, refresh rotation и cookie attributes:
+[auth.md](auth.md). OpenAPI JSON в development: `/api/v1/docs-json`.
 
 ## `POST /auth/register`
 
@@ -49,7 +49,7 @@ Response:
 Response:
 
 ```text
-200 OK
+201 Created
 ```
 
 Backend выставляет access и refresh credentials только через `HttpOnly`,

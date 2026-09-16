@@ -1,206 +1,248 @@
-# Авторизация
+# Авторизация для frontend
 
-RIFT использует browser-first схему: короткоживущий JWT access token и
-ротацию opaque refresh token. Оба токена хранятся только в защищённых
-cookies. PostgreSQL хранит refresh-сессии и остаётся source of truth.
+Backend использует cookie-first авторизацию. Frontend не получает и не хранит
+access или refresh token: браузер отправляет `HttpOnly` cookies сам.
 
-Redis не участвует в проверке пользователя или хранении refresh token. Он
-нужен для rate limiting login/register/refresh и других временных данных.
+## Контракт и базовый URL
 
-## Решение
+```text
+API:     /api/v1
+Swagger: /api/v1/docs                 # только development
+OpenAPI: /api/v1/docs-json            # только development
+```
 
-| Подход | Решение для RIFT | Почему |
-| --- | --- | --- |
-| JWT только в `localStorage` | Нет | XSS позволяет украсть токен. |
-| Server-side session только в Redis | Нет | Сессии нужны после рестарта, для logout и списка устройств. |
-| JWT access + refresh-сессия в PostgreSQL | Да | Быстрая проверка access token, управляемые и отзываемые сессии. |
+OpenAPI JSON — источник типов и endpoint-контрактов для frontend. Эта страница
+объясняет работу с cookies, CSRF и обновлением сессии.
 
-Redis можно добавить как backend для общего rate limit при нескольких
-экземплярах API. Он не заменяет таблицу `sessions`.
+## Cookies
 
-## Токены и cookies
-
-| Cookie | Значение | Срок | Атрибуты |
+| Среда | Access | Refresh | CSRF |
 | --- | --- | --- | --- |
-| `__Host-rift_access` | JWT: `sub`, `sid`, `role`, `iss`, `aud`, `iat`, `exp` | 15 минут | `HttpOnly; Secure; SameSite=Strict; Path=/` |
-| `__Host-rift_refresh` | `sessionId.secret`, где `secret` — 256-битное случайное значение | до 30 дней | `HttpOnly; Secure; SameSite=Strict; Path=/` |
-| `__Host-rift_csrf` | случайный CSRF token; не является credential | сессия браузера | `Secure; SameSite=Strict; Path=/` |
+| Development | `rift_access` | `rift_refresh` | `rift_csrf` |
+| Production | `__Host-rift_access` | `__Host-rift_refresh` | `__Host-rift_csrf` |
 
-`__Host-` требует HTTPS, `Path=/` и отсутствия `Domain`. В production API
-должен работать на том же host, что и frontend, например
-`https://rift.example.com/api/v1`, через reverse proxy. Это даёт
-host-only cookies и не требует cross-origin CORS.
+- access и refresh — `HttpOnly`: JavaScript не может их прочитать;
+- CSRF cookie доступна через `document.cookie`;
+- все cookies имеют `SameSite=Strict` и `Path=/`;
+- в production cookies также имеют `Secure`.
 
-Для локальной разработки допустимы обычные имена cookies и `Secure: false`.
-Это только dev-исключение: production не должен запускаться с такими
-настройками.
+Не сохраняйте токены в `localStorage`, `sessionStorage`, Zustand, Redux или
+TanStack Query. В состоянии frontend хранится только модель пользователя.
 
-Access JWT не содержит email, пароль, refresh token, permissions snapshot
-или другую чувствительную информацию. JWT подписывается отдельным ключом,
-проверяется по `iss`, `aud`, `exp` и алгоритму, явно разрешённому в
-конфигурации.
+## CSRF: первый запрос и mutation
 
-## Хранение сессий
+Перед первым `POST`, `PUT`, `PATCH` или `DELETE` вызовите:
 
-Таблица `sessions` хранит только хеш refresh secret, никогда исходный
-refresh token.
-
-| Поле | Назначение |
-| --- | --- |
-| `id` | UUID сессии; первая часть refresh cookie. |
-| `user_id` | Владелец сессии. |
-| `refresh_token_hash` | Argon2id-хеш второй части refresh cookie. |
-| `expires_at` | Абсолютный срок жизни сессии. |
-| `created_at`, `last_used_at` | Аудит и отображение активных сессий. |
-| `revoked_at` | Признак logout, отзыва или повторного использования токена. |
-| `user_agent` | Необязательная подпись устройства для UI; не credential. |
-
-Нужны индекс `sessions(user_id)` для списка устройств и индекс по
-`expires_at` для фоновой очистки истёкших записей. Текущая SQL migration ещё
-не создаёт эту таблицу: её нужно добавить вместе с реализацией auth-модуля.
-
-## Backend: flow
-
-### Регистрация и вход
-
-1. `POST /auth/register` или `POST /auth/login` валидирует DTO и проходит
-   rate limit.
-2. Пароль сравнивается с Argon2id-хешем. В БД не бывает plaintext-password,
-   SHA-256 или MD5.
-3. В одной transaction создаётся `sessions` row, генерируется случайный
-   refresh secret и записывается его Argon2id-хеш.
-4. Backend выставляет access, refresh и CSRF cookies; в body возвращает
-   только безопасную модель пользователя.
-
-Пароль следует принимать длиной до 128 символов и не обрезать. Argon2id
-должен быть настроен не слабее `memoryCost: 19456`, `timeCost: 2`,
-`parallelism: 1`; значения нужно измерить на production-инфраструктуре.
-
-### Проверка защищённых запросов
-
-`JwtAuthGuard` читает access cookie, проверяет подпись и claims и помещает
-`sub`/`sid`/`role` в request context. Контроллеры используют
-`CurrentUser` decorator, а авторизация ресурса проверяется сервисом:
-валидный JWT не даёт доступ к чужому incident.
-
-Access JWT не проверяется через Redis или PostgreSQL на каждом запросе.
-После logout он может действовать до 15 минут; это осознанный компромисс.
-Для немедленного глобального отзыва потребуется отдельная проверка session
-или `token_version` на каждом чувствительном запросе — добавлять её только
-если это станет требованием.
-
-### Обновление токенов
-
-1. Frontend вызывает `POST /auth/refresh` при `401` от access token или при
-   запуске приложения.
-2. Backend разбирает `sessionId.secret`, берёт сессию `FOR UPDATE`, проверяет
-   `revoked_at`, `expires_at` и Argon2id-хеш.
-3. В той же transaction заменяет хеш новым случайным secret, обновляет
-   `last_used_at` и выставляет новую пару cookies.
-4. Если старый или неверный refresh token предъявлен повторно, сессия
-   отзывается, cookies очищаются и возвращается `401`.
-
-Клиент должен выполнять только один refresh одновременно; остальные запросы
-ждут его результат. Иначе параллельные запросы сами создадут ложное
-«повторное использование» токена.
-
-### Logout и управление устройствами
-
-`POST /auth/logout` отзывает текущую сессию и очищает все auth cookies.
-`DELETE /users/me/sessions/:id` позволяет отозвать другую сессию только её
-владельцу. Ответ списка сессий никогда не содержит token, hash, IP или
-полный User-Agent.
-
-## CSRF, CORS и HTTP
-
-Cookies защищают от чтения из JavaScript, но браузер автоматически добавляет
-их к запросу. Для каждого небезопасного метода (`POST`, `PUT`, `PATCH`,
-`DELETE`) backend обязан:
-
-1. сравнить заголовок `X-CSRF-Token` со значением CSRF cookie;
-2. проверить `Origin` по точному allowlist;
-3. вернуть `403`, если любая проверка не пройдена.
-
-Это распространяется и на login/register, чтобы избежать login CSRF.
-`SameSite=Strict` — дополнительная защита, а не замена CSRF-проверке.
-
-Если frontend и API нельзя разместить на одном host, разрешаются только
-явные origins, `credentials: true` и `SameSite=None; Secure`; wildcard `*`
-в CORS запрещён. Такой режим сложнее и должен быть исключением.
-
-На ответах, которые выставляют credentials, отправляйте
-`Cache-Control: no-store`. TLS обязателен. В логах нельзя писать cookies,
-Authorization headers, passwords или refresh token.
-
-## Rate limit и Redis
-
-Redis-ключи имеют TTL и не содержат credentials:
-
-```text
-rate-limit:login:{ip}
-rate-limit:login:{normalized-email}:{ip}
-rate-limit:refresh:{ip}
-rate-limit:refresh:{sessionId}
+```http
+GET /api/v1/auth/csrf
 ```
 
-Лимиты нужны как минимум для `register`, `login`, `refresh` и reset-password.
-Сочетайте лимит по IP и по account identifier, но возвращайте одинаковую
-ошибку входа для неизвестного email и неверного пароля. Это не даёт
-enumerate пользователей.
+Ответ — `204 No Content` и `Set-Cookie` с CSRF token. Для каждого небезопасного
+запроса передавайте значение этой cookie в заголовке `X-CSRF-Token`.
 
-## Frontend: Next.js
+```ts
+const API_URL = 'http://localhost:3000/api/v1';
+const CSRF_COOKIE_NAME = import.meta.env.PROD
+  ? '__Host-rift_csrf'
+  : 'rift_csrf';
 
-Frontend не читает, не сохраняет и не передаёт access/refresh token вручную:
+function readCookie(name: string) {
+  const prefix = `${name}=`;
+  const cookie = document.cookie
+    .split('; ')
+    .find((item) => item.startsWith(prefix));
 
-ни `localStorage`, ни Zustand, ни TanStack Query не содержат credentials.
-Browser сам отправляет `HttpOnly` cookies. Модель текущего пользователя
-получается из `GET /users/me` и хранится как обычные query data.
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+}
 
-Для любого mutation frontend считывает CSRF cookie и добавляет
-`X-CSRF-Token`. HTTP-клиент отправляет credentials и при одном `401`
-выполняет общий `POST /auth/refresh`, после чего повторяет исходный запрос
-один раз. Если refresh завершился `401`, он очищает query cache и направляет
-на `/login`.
-
-После login/register frontend запрашивает `GET /users/me`, а не декодирует
-JWT. Logout вызывает API, очищает локальный query cache и закрывает socket.
-Socket.IO проходит тот же origin check и аутентифицируется access cookie в
-handshake; gateway проверяет JWT до `join` любой room.
-
-## API contract
-
-| Endpoint | Поведение |
-| --- | --- |
-| `POST /auth/register` | Создаёт пользователя и первую сессию, `201`, выставляет cookies. |
-| `POST /auth/login` | Создаёт сессию, `200`, выставляет cookies. |
-| `POST /auth/refresh` | Ротирует refresh token и access token, `204`, выставляет cookies. |
-| `POST /auth/logout` | Отзывает текущую сессию, очищает cookies, `204`. |
-| `GET /users/me` | Возвращает безопасную модель текущего пользователя. |
-| `GET /users/me/sessions` | Возвращает метаданные активных сессий. |
-| `DELETE /users/me/sessions/:id` | Отзывает указанную сессию пользователя, `204`. |
-
-## Необходимые NestJS-компоненты
-
-```text
-modules/auth/
-├── auth.controller.ts
-├── auth.service.ts
-├── sessions.repository.ts
-├── password.service.ts
-├── jwt-auth.guard.ts
-├── csrf.guard.ts
-└── dto/
+export async function initCsrf() {
+  await fetch(`${API_URL}/auth/csrf`, { credentials: 'include' });
+}
 ```
 
-Используются `@nestjs/jwt` для подписи и проверки JWT, глобальный
-`ValidationPipe` с `whitelist` и `forbidNonWhitelisted`, а также
-`@nestjs/throttler` с Redis storage при нескольких экземплярах API. Secrets
-валидируются на старте и приходят из environment/secret manager.
+После `register`, `login` и `refresh` backend выпускает новый CSRF token. Не
+кешируйте его: читайте cookie непосредственно перед mutation.
 
-## Источники
+## HTTP-клиент
 
-- [NestJS authentication](https://docs.nestjs.com/security/authentication)
-- [NestJS rate limiting](https://docs.nestjs.com/security/rate-limiting)
-- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-- [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
-- [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+Все запросы должны передавать `credentials: 'include'`. Браузер добавит
+`Origin`; backend сверяет его со значением `CORS_ORIGIN`.
+
+```ts
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+export async function request(path: string, init: RequestInit = {}) {
+  const method = (init.method ?? 'GET').toUpperCase();
+  const headers = new Headers(init.headers);
+
+  if (!SAFE_METHODS.has(method)) {
+    const csrfToken = readCookie(CSRF_COOKIE_NAME);
+
+    if (!csrfToken) {
+      throw new Error('CSRF cookie is missing. Call initCsrf() first.');
+    }
+
+    headers.set('X-CSRF-Token', csrfToken);
+  }
+
+  return fetch(`${API_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+}
+```
+
+Рекомендуемая production-схема — frontend и API на одном host за reverse
+proxy:
+
+```text
+https://rift.example.com        frontend
+https://rift.example.com/api/v1 backend
+```
+
+`localhost:5173` и `localhost:3000` также совместимы: порт не входит в domain
+cookie. Разные production subdomain, например `app.example.com` и
+`api.example.com`, с текущими `__Host-` cookies не поддерживаются без изменения
+deployment-схемы.
+
+## Auth flow
+
+### Инициализация приложения
+
+1. Вызвать `GET /auth/csrf`.
+2. Вызвать `GET /users/me`.
+3. При `401` один раз вызвать `POST /auth/refresh`.
+4. При успешном refresh повторить `GET /users/me`; при неуспехе показать
+   неавторизованное состояние.
+
+Не декодируйте JWT на клиенте для принятия решений об авторизации. Источник
+истины — ответ `GET /users/me`.
+
+### Регистрация
+
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+X-CSRF-Token: <csrf-cookie-value>
+
+{
+  "email": "user@example.com",
+  "password": "strong-password"
+}
+```
+
+Успех: `201 Created`, response body:
+
+```json
+{
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "createdAt": "2026-09-16T12:00:00.000Z"
+  }
+}
+```
+
+Backend установит access, refresh и новый CSRF cookies. Сохраните `user` в
+клиентском состоянии или запросите `GET /users/me` заново.
+
+### Вход
+
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+X-CSRF-Token: <csrf-cookie-value>
+
+{
+  "email": "user@example.com",
+  "password": "strong-password"
+}
+```
+
+Успех: `201 Created` с тем же телом `{ "user": ... }` и новыми cookies.
+Неверный email или пароль возвращает `401`; refresh в этом случае не нужен.
+
+### Обновление сессии
+
+При `401` от защищённого endpoint вызовите:
+
+```http
+POST /api/v1/auth/refresh
+X-CSRF-Token: <csrf-cookie-value>
+```
+
+Успех: `204 No Content`. Backend ротирует refresh token, устанавливает новый
+access cookie и новый CSRF cookie. Один refresh должен выполняться одновременно:
+
+```ts
+let refreshPromise: Promise<Response> | null = null;
+
+export function refreshSession() {
+  refreshPromise ??= request('/auth/refresh', { method: 'POST' })
+    .finally(() => {
+      refreshPromise = null;
+    });
+
+  return refreshPromise;
+}
+```
+
+Если refresh вернул `401`, очистите данные текущего пользователя и направьте
+пользователя на вход. Не повторяйте refresh для самого `/auth/refresh`.
+
+### Выход
+
+```http
+POST /api/v1/auth/logout
+X-CSRF-Token: <csrf-cookie-value>
+```
+
+Успех: `204 No Content`. Backend отзывает текущую сессию и очищает auth cookies.
+После ответа очистите пользовательские данные и кеш защищённых запросов.
+
+## Текущий пользователь и устройства
+
+```http
+GET /api/v1/users/me
+```
+
+Успех: `200 OK` с объектом пользователя. Если access cookie истекла — `401`;
+используйте описанный выше refresh flow.
+
+```http
+GET /api/v1/users/me/sessions
+```
+
+Возвращает активные сессии пользователя. Поле `userAgent` — строка браузера и
+устройства, записанная при входе; она может быть `null` и служит только для
+понятного списка устройств.
+
+```http
+DELETE /api/v1/users/me/sessions/:id
+X-CSRF-Token: <csrf-cookie-value>
+```
+
+Отзывает другую сессию и возвращает `204`. Текущую сессию этим endpoint удалить
+нельзя (`400`) — для неё используется `POST /auth/logout`.
+
+## Обработка ошибок
+
+| Статус | Значение для UI |
+| --- | --- |
+| `400` | Ошибка валидации, либо попытка удалить текущую сессию. Покажите сообщение из response body. |
+| `401` | Нет или истёк access/refresh token. Для защищённого запроса один раз попробуйте refresh. |
+| `403` | CSRF token отсутствует/не совпал либо не совпал `Origin`. Сначала получите CSRF cookie заново. |
+| `409` | Email уже зарегистрирован. Покажите ошибку поля email. |
+| `429` | Сработал rate limit. Покажите retry-later состояние. |
+
+Не пытайтесь вручную удалять auth cookies: их важные cookies `HttpOnly`, а
+окончательное завершение сессии всегда делает `POST /auth/logout`.
+
+## Swagger
+
+В development UI доступен по `/api/v1/docs`, а машинная спецификация — по
+`/api/v1/docs-json`. Swagger описывает формы запросов и ответов, но не заменяет
+реальный browser flow: `HttpOnly` cookies нельзя подставить вручную через
+`Authorize`. Для ручной проверки сначала получите CSRF cookie через
+`GET /auth/csrf`, затем отправляйте `X-CSRF-Token`.
