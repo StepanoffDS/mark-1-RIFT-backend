@@ -21,10 +21,10 @@ export class RegisterDto {
   @ApiProperty({
     example: 'SecurePassword123!',
     format: 'password',
-    minLength: 12,
+    minLength: 8,
     maxLength: 128,
   })
   @IsString()
-  @Length(12, 128)
+  @Length(8, 128)
   password!: string;
 }
