@@ -1,4 +1,4 @@
-import type { RequestWithCookies } from 'src/config/types';
+import type { RequestWithCookies } from '@config/types';
 
 export type Credentials = {
   accessToken: string;

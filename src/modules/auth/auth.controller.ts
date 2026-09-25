@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
+import { getRefreshSessionTtlMs, isProduction } from '@config/app-env';
+import { RequestWithCookies } from '@config/types';
 import {
   Body,
   Controller,
@@ -26,8 +28,6 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
-import { getRefreshSessionTtlMs, isProduction } from 'src/config/app-env';
-import { RequestWithCookies } from 'src/config/types';
 
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';

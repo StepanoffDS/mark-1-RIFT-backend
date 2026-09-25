@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 
+import type { RequestWithCookies } from '@config/types';
 import {
   CanActivate,
   ExecutionContext,
@@ -7,7 +8,6 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { RequestWithCookies } from 'src/config/types';
 
 import { getAuthCookieName } from '../lib/auth-cookie';
 import { AuthCookie } from '../types';

@@ -1,6 +1,6 @@
+import { DatabaseService } from '@infrastructure/database/database.service';
 import { Injectable } from '@nestjs/common';
 import { type PoolClient } from 'pg';
-import { DatabaseService } from 'src/infrastructure/database/database.service';
 
 type SessionRow = {
   id: string;

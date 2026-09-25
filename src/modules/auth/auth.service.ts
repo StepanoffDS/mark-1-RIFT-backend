@@ -1,3 +1,5 @@
+import { getRefreshSessionTtlMs } from '@config/app-env';
+import { DatabaseService } from '@infrastructure/database/database.service';
 import {
   ConflictException,
   Injectable,
@@ -7,8 +9,6 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
 import { type PoolClient } from 'pg';
-import { getRefreshSessionTtlMs } from 'src/config/app-env';
-import { DatabaseService } from 'src/infrastructure/database/database.service';
 
 import { PasswordService } from './password.service';
 import { SessionsRepository } from './sessions.repository';

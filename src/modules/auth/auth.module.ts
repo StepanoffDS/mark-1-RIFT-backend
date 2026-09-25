@@ -36,5 +36,6 @@ import { UsersRepository } from './users.repository';
     CsrfGuard,
     AccessTokenGuard,
   ],
+  exports: [JwtModule],
 })
 export class AuthModule {}

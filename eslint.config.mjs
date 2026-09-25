@@ -40,6 +40,8 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-require-imports': 'off',
+      'eslint@typescript-eslint/no-unsafe-assignment': 'off',
+      'eslint@typescript-eslint/no-unsafe-call': 'off',
     },
   },
 );

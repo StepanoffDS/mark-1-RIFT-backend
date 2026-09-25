@@ -1,5 +1,5 @@
+import { isProduction } from '@config/app-env';
 import type { ConfigService } from '@nestjs/config';
-import { isProduction } from 'src/config/app-env';
 
 import { AuthCookie } from '../types';
 
