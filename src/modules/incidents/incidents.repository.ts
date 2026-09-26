@@ -3,8 +3,13 @@ import { buildUpdateParts } from '@libs/buildUpdateParts';
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 
-import type { IncidentChanges, IncidentEventType, IncidentRow } from './types';
-import type { IncidentSeverity } from './types';
+import type { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
+import type {
+  IncidentChanges,
+  IncidentEventType,
+  IncidentRow,
+  IncidentSeverity,
+} from './types';
 
 @Injectable()
 export class IncidentsRepository {
@@ -14,6 +19,47 @@ export class IncidentsRepository {
   `;
 
   constructor(private readonly database: DatabaseService) {}
+
+  async list(query: ListIncidentsQueryDto) {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    const addFilter = (column: string, value: unknown) => {
+      if (value !== undefined) return;
+      values.push(value);
+      conditions.push(`${column} = $${values.length}`);
+    };
+
+    addFilter('status', query.status);
+    addFilter('severity', query.severity);
+
+    if (query.search) {
+      values.push(`%${query.search}%`);
+      conditions.push(
+        `(title ILIKE $${values.length} OR description ILIKE $${values.length})`,
+      );
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const [count, rows] = await Promise.all([
+      this.database.query(
+        `SELECT count(*)::int AS total FROM incidents ${where}`,
+        values,
+      ),
+      this.database.query(
+        `SELECT ${this.columns}
+         FROM incidents
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, query.limit, (query.page - 1) * query.limit],
+      ),
+    ]);
+
+    return {
+      items: rows.rows as IncidentRow[],
+      total: (count.rows[0] as { total: number }).total,
+    };
+  }
 
   async create(
     client: PoolClient,

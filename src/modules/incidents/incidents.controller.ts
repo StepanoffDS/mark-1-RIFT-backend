@@ -4,10 +4,12 @@ import { AuthenticatedRequest } from '@modules/auth/types';
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -26,6 +28,7 @@ import {
 } from '@nestjs/swagger';
 
 import { CreateIncidentDto } from './dto/create-incident.dto';
+import { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
 import { IncidentResponseDto } from './dto/response.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
 import { IncidentsService } from './incidents.service';
@@ -36,7 +39,37 @@ import type { IncidentRow } from './types';
 @UseGuards(AccessTokenGuard)
 @Controller('incidents')
 export class IncidentsController {
-  constructor(private readonly service: IncidentsService) {}
+  constructor(private readonly incidentsService: IncidentsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List incidents' })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/IncidentDto' },
+        },
+        page: { type: 'integer' },
+        limit: { type: 'integer' },
+        total: { type: 'integer' },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid.',
+  })
+  async list(@Query() query: ListIncidentsQueryDto) {
+    const result = await this.incidentsService.list(query);
+
+    return {
+      ...result,
+      items: result.items.map((incident) => this.present(incident)),
+      page: query.page,
+      limit: query.limit,
+    };
+  }
 
   @Post()
   @UseGuards(AccessTokenGuard, CsrfGuard)
@@ -56,7 +89,7 @@ export class IncidentsController {
     @Body() dto: CreateIncidentDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    const incident = await this.service.create(dto, request.user.sub);
+    const incident = await this.incidentsService.create(dto, request.user.sub);
 
     return { incident: this.present(incident) };
   }
@@ -82,7 +115,11 @@ export class IncidentsController {
     @Body() dto: UpdateIncidentDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    const incident = await this.service.update(id, dto, request.user.sub);
+    const incident = await this.incidentsService.update(
+      id,
+      dto,
+      request.user.sub,
+    );
 
     return { incident: this.present(incident) };
   }

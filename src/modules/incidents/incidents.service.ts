@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 
 import { CreateIncidentDto } from './dto/create-incident.dto';
+import { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
 import { IncidentsRepository } from './incidents.repository';
 import { type IncidentChanges, IncidentEventType } from './types';
@@ -18,6 +19,10 @@ export class IncidentsService {
     private readonly database: DatabaseService,
     private readonly repository: IncidentsRepository,
   ) {}
+
+  list(query: ListIncidentsQueryDto) {
+    return this.repository.list(query);
+  }
 
   async create(dto: CreateIncidentDto, actorId: string) {
     const title = dto.title.trim();

@@ -127,6 +127,11 @@ Query parameters:
 &limit=20
 ```
 
+`status` принимается из `OPEN`, `INVESTIGATING`, `MONITORING`, `RESOLVED`;
+`severity` — из `P1`, `P2`, `P3`. `page` начинается с 1, `limit` по умолчанию
+равен 20 и ограничен значением 100. Результаты отсортированы по дате создания
+от новых к старым.
+
 Response:
 
 ```json
