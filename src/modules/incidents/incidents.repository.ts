@@ -1,5 +1,6 @@
 import { DatabaseService } from '@infrastructure/database/database.service';
 import { buildUpdateParts } from '@libs/buildUpdateParts';
+import { getPaginationOffset, type PaginatedResult } from '@libs/pagination';
 import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 
@@ -20,11 +21,13 @@ export class IncidentsRepository {
 
   constructor(private readonly database: DatabaseService) {}
 
-  async list(query: ListIncidentsQueryDto) {
+  async list(
+    query: ListIncidentsQueryDto,
+  ): Promise<PaginatedResult<IncidentRow>> {
     const conditions: string[] = [];
     const values: unknown[] = [];
     const addFilter = (column: string, value: unknown) => {
-      if (value !== undefined) return;
+      if (value === undefined) return;
       values.push(value);
       conditions.push(`${column} = $${values.length}`);
     };
@@ -51,12 +54,14 @@ export class IncidentsRepository {
          ${where}
          ORDER BY created_at DESC
          LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
-        [...values, query.limit, (query.page - 1) * query.limit],
+        [...values, query.limit, getPaginationOffset(query)],
       ),
     ]);
 
     return {
       items: rows.rows as IncidentRow[],
+      page: query.page,
+      limit: query.limit,
       total: (count.rows[0] as { total: number }).total,
     };
   }
