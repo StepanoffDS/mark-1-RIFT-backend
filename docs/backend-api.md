@@ -220,7 +220,7 @@ incident:status_changed
 
 ## `PUT /incidents/:id/assignee`
 
-Назначение пользователя.
+Назначение пользователя. Требует access cookie и `X-CSRF-Token`.
 
 ```json
 {
@@ -228,11 +228,16 @@ incident:status_changed
 }
 ```
 
+В ответе возвращается обновлённый инцидент. В `incident_events` добавляется
+`USER_ASSIGNED` с `from` и `to`.
+
 ---
 
 ## `DELETE /incidents/:id/assignee`
 
-Удаление assignee.
+Снятие ответственного. Требует access cookie и `X-CSRF-Token`. В ответе
+возвращается обновлённый инцидент, а в `incident_events` добавляется
+`USER_UNASSIGNED` с `from` и `to`.
 
 ---
 

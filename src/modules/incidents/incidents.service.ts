@@ -16,12 +16,12 @@ import { type IncidentChanges, IncidentEventType } from './types';
 @Injectable()
 export class IncidentsService {
   constructor(
-    private readonly database: DatabaseService,
-    private readonly repository: IncidentsRepository,
+    private readonly databaseService: DatabaseService,
+    private readonly incidentsRepository: IncidentsRepository,
   ) {}
 
   list(query: ListIncidentsQueryDto) {
-    return this.repository.list(query);
+    return this.incidentsRepository.list(query);
   }
 
   async create(dto: CreateIncidentDto, actorId: string) {
@@ -32,8 +32,8 @@ export class IncidentsService {
     }
 
     try {
-      return await this.database.transaction(async (client) => {
-        const incident = await this.repository.create(client, {
+      return await this.databaseService.transaction(async (client) => {
+        const incident = await this.incidentsRepository.create(client, {
           title,
           description: dto.description?.trim() || null,
           severity: dto.severity,
@@ -41,7 +41,7 @@ export class IncidentsService {
           assignedTo: dto.assignedTo ?? null,
         });
 
-        await this.repository.createEvent(
+        await this.incidentsRepository.createEvent(
           client,
           incident.id,
           actorId,
@@ -76,20 +76,27 @@ export class IncidentsService {
     }
 
     try {
-      return await this.database.transaction(async (client) => {
-        const previous = await this.repository.findByIdForUpdate(client, id);
+      return await this.databaseService.transaction(async (client) => {
+        const previous = await this.incidentsRepository.findByIdForUpdate(
+          client,
+          id,
+        );
 
         if (!previous) {
           throw new NotFoundException('Incident not found');
         }
 
-        const incident = await this.repository.update(client, id, changes);
+        const incident = await this.incidentsRepository.update(
+          client,
+          id,
+          changes,
+        );
 
         if (!incident) {
           throw new BadRequestException('At least one field is required');
         }
 
-        await this.repository.createEvent(
+        await this.incidentsRepository.createEvent(
           client,
           incident.id,
           actorId,
@@ -98,8 +105,64 @@ export class IncidentsService {
             title: ['title', 'title'],
             description: ['description', 'description'],
             severity: ['severity', 'severity'],
-            assignedTo: ['assigned_to', 'assigned_to'],
           }),
+        );
+
+        return incident;
+      });
+    } catch (error) {
+      if (this.isForeignKeyViolation(error)) {
+        throw new BadRequestException('Assigned user does not exist');
+      }
+
+      throw error;
+    }
+  }
+
+  assign(id: string, userId: string, actorId: string) {
+    return this.changeAssignee(id, userId, actorId);
+  }
+
+  unassign(id: string, actorId: string) {
+    return this.changeAssignee(id, null, actorId);
+  }
+
+  private async changeAssignee(
+    id: string,
+    userId: string | null,
+    actorId: string,
+  ) {
+    try {
+      return await this.databaseService.transaction(async (client) => {
+        const previous = await this.incidentsRepository.findByIdForUpdate(
+          client,
+          id,
+        );
+
+        if (!previous) {
+          throw new NotFoundException('Incident not found');
+        }
+
+        if (previous.assigned_to === userId) {
+          return previous;
+        }
+
+        const incident = await this.incidentsRepository.update(client, id, {
+          assignedTo: userId,
+        });
+
+        if (!incident) {
+          throw new NotFoundException('Incident not found');
+        }
+
+        await this.incidentsRepository.createEvent(
+          client,
+          incident.id,
+          actorId,
+          userId
+            ? IncidentEventType.USER_ASSIGNED
+            : IncidentEventType.USER_UNASSIGNED,
+          { from: previous.assigned_to, to: incident.assigned_to },
         );
 
         return incident;
@@ -119,7 +182,6 @@ export class IncidentsService {
       {
         description: ({ description }) => description,
         severity: ({ severity }) => severity,
-        assignedTo: ({ assignedTo }) => assignedTo,
       },
     );
 

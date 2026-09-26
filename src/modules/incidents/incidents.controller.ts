@@ -4,11 +4,13 @@ import { AuthenticatedRequest } from '@modules/auth/types';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -27,6 +29,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
+import { AssignIncidentDto } from './dto/assign-incident.dto';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
 import { IncidentResponseDto } from './dto/response.dto';
@@ -120,6 +123,60 @@ export class IncidentsController {
       dto,
       request.user.sub,
     );
+
+    return { incident: this.present(incident) };
+  }
+
+  @Put(':id/assignee')
+  @UseGuards(AccessTokenGuard, CsrfGuard)
+  @ApiOperation({ summary: 'Assign a user to an incident' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    required: true,
+    description: 'Value of the readable rift_csrf cookie.',
+  })
+  @ApiOkResponse({ type: IncidentResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid user or incident ID.' })
+  @ApiNotFoundResponse({ description: 'Incident not found.' })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid.',
+  })
+  @ApiForbiddenResponse({ description: 'CSRF token or Origin is invalid.' })
+  async assign(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignIncidentDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    const incident = await this.incidentsService.assign(
+      id,
+      dto.userId,
+      request.user.sub,
+    );
+
+    return { incident: this.present(incident) };
+  }
+
+  @Delete(':id/assignee')
+  @UseGuards(AccessTokenGuard, CsrfGuard)
+  @ApiOperation({ summary: 'Unassign a user from an incident' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    required: true,
+    description: 'Value of the readable rift_csrf cookie.',
+  })
+  @ApiOkResponse({ type: IncidentResponseDto })
+  @ApiNotFoundResponse({ description: 'Incident not found.' })
+  @ApiUnauthorizedResponse({
+    description: 'Access token is missing or invalid.',
+  })
+  @ApiForbiddenResponse({ description: 'CSRF token or Origin is invalid.' })
+  async unassign(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    const incident = await this.incidentsService.unassign(id, request.user.sub);
 
     return { incident: this.present(incident) };
   }

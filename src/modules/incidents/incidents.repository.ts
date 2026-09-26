@@ -19,7 +19,7 @@ export class IncidentsRepository {
     created_by, assigned_to, created_at, updated_at, resolved_at
   `;
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(private readonly databaseService: DatabaseService) {}
 
   async list(
     query: ListIncidentsQueryDto,
@@ -44,11 +44,11 @@ export class IncidentsRepository {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const [count, rows] = await Promise.all([
-      this.database.query(
+      this.databaseService.query(
         `SELECT count(*)::int AS total FROM incidents ${where}`,
         values,
       ),
-      this.database.query(
+      this.databaseService.query(
         `SELECT ${this.columns}
          FROM incidents
          ${where}
@@ -94,7 +94,7 @@ export class IncidentsRepository {
   }
 
   async findById(id: string): Promise<IncidentRow | null> {
-    const result = await this.database.query(
+    const result = await this.databaseService.query(
       `SELECT ${this.columns}
        FROM incidents
        WHERE id = $1`,
