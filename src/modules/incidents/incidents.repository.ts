@@ -7,6 +7,7 @@ import type { PoolClient } from 'pg';
 import type { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
 import type {
   IncidentChanges,
+  IncidentEventRow,
   IncidentEventType,
   IncidentRow,
   IncidentSeverity,
@@ -102,6 +103,26 @@ export class IncidentsRepository {
     );
 
     return (result.rows[0] as IncidentRow | undefined) ?? null;
+  }
+
+  async listEvents(
+    incidentId: string,
+    limit: number,
+    cursor?: { createdAt: string; id: string },
+  ): Promise<IncidentEventRow[]> {
+    const result = await this.databaseService.query(
+      `SELECT e.id, e.type, e.actor_id, u.username AS actor_username,
+              e.payload, e.created_at
+       FROM incident_events e
+       LEFT JOIN users u ON u.id = e.actor_id
+       WHERE e.incident_id = $1
+         AND ($2::timestamptz IS NULL OR (e.created_at, e.id) < ($2, $3))
+       ORDER BY e.created_at DESC, e.id DESC
+       LIMIT $4`,
+      [incidentId, cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
+    );
+
+    return result.rows as IncidentEventRow[];
   }
 
   async findByIdForUpdate(

@@ -31,6 +31,7 @@ import {
 
 import { AssignIncidentDto } from './dto/assign-incident.dto';
 import { CreateIncidentDto } from './dto/create-incident.dto';
+import { ListIncidentEventsQueryDto } from './dto/list-incident-events-query.dto';
 import { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
 import { IncidentResponseDto } from './dto/response.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
@@ -72,6 +73,26 @@ export class IncidentsController {
       page: query.page,
       limit: query.limit,
     };
+  }
+
+  @Get(':id/events')
+  @ApiOperation({ summary: 'List incident history' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { type: 'object' } },
+        nextCursor: { type: 'string', nullable: true },
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Incident not found.' })
+  async listEvents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListIncidentEventsQueryDto,
+  ) {
+    return this.incidentsService.listEvents(id, query);
   }
 
   @Post()

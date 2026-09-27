@@ -35,6 +35,15 @@ export type IncidentRow = {
   resolved_at: Date | null;
 };
 
+export type IncidentEventRow = {
+  id: string;
+  type: IncidentEventType;
+  actor_id: string | null;
+  actor_username: string | null;
+  payload: Record<string, unknown>;
+  created_at: Date;
+};
+
 export type IncidentChanges = {
   title?: string;
   description?: string | null;

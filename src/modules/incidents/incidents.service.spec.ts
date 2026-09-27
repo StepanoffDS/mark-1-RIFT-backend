@@ -40,7 +40,9 @@ describe('IncidentsService', () => {
     } as unknown as jest.Mocked<DatabaseService>;
     repository = {
       list: jest.fn(),
+      listEvents: jest.fn(),
       create: jest.fn(),
+      findById: jest.fn(),
       findByIdForUpdate: jest.fn(),
       update: jest.fn(),
       createEvent: jest.fn(),
@@ -84,6 +86,105 @@ describe('IncidentsService', () => {
 
     await expect(service.list(query)).resolves.toBe(result);
     expect(repository.list.mock.calls).toContainEqual([query]);
+  });
+
+  it('returns incident events and an encoded cursor when another page exists', async () => {
+    const firstEvent = {
+      id: '00000000-0000-4000-8000-000000000001',
+      type: IncidentEventType.INCIDENT_UPDATED,
+      actor_id: 'actor-id',
+      actor_username: 'dmitry',
+      payload: { title: { from: 'Old', to: 'New' } },
+      created_at: new Date('2026-09-27T12:00:00.000Z'),
+    };
+    jest.spyOn(repository, 'findById').mockResolvedValue(incident);
+    jest
+      .spyOn(repository, 'listEvents')
+      .mockResolvedValue([
+        firstEvent,
+        { ...firstEvent, id: '00000000-0000-4000-8000-000000000002' },
+      ]);
+
+    const result = await service.listEvents(incident.id, {
+      limit: 1,
+    });
+
+    expect(result).toEqual({
+      items: [
+        {
+          type: IncidentEventType.INCIDENT_UPDATED,
+          actor: { id: 'actor-id', username: 'dmitry' },
+          payload: firstEvent.payload,
+          createdAt: firstEvent.created_at,
+        },
+      ],
+      nextCursor: Buffer.from(
+        JSON.stringify({
+          createdAt: firstEvent.created_at,
+          id: firstEvent.id,
+        }),
+      ).toString('base64url'),
+    });
+    expect(repository.listEvents.mock.calls).toContainEqual([
+      incident.id,
+      1,
+      undefined,
+    ]);
+  });
+
+  it('decodes the next-page cursor and handles a missing actor', async () => {
+    const event = {
+      id: '00000000-0000-4000-8000-000000000001',
+      type: IncidentEventType.INCIDENT_CREATED,
+      actor_id: null,
+      actor_username: null,
+      payload: {},
+      created_at: new Date('2026-09-27T12:00:00.000Z'),
+    };
+    const cursor = Buffer.from(
+      JSON.stringify({
+        createdAt: '2026-09-27T12:01:00.000Z',
+        id: '00000000-0000-4000-8000-000000000002',
+      }),
+    ).toString('base64url');
+    jest.spyOn(repository, 'findById').mockResolvedValue(incident);
+    jest.spyOn(repository, 'listEvents').mockResolvedValue([event]);
+
+    await expect(
+      service.listEvents(incident.id, { limit: 2, cursor }),
+    ).resolves.toEqual({
+      items: [
+        {
+          type: IncidentEventType.INCIDENT_CREATED,
+          actor: null,
+          payload: {},
+          createdAt: event.created_at,
+        },
+      ],
+      nextCursor: null,
+    });
+    expect(repository.listEvents.mock.calls).toContainEqual([
+      incident.id,
+      2,
+      {
+        createdAt: '2026-09-27T12:01:00.000Z',
+        id: '00000000-0000-4000-8000-000000000002',
+      },
+    ]);
+  });
+
+  it('rejects an invalid event cursor and reports a missing incident', async () => {
+    jest.spyOn(repository, 'findById').mockResolvedValue(incident);
+    await expect(
+      service.listEvents(incident.id, { limit: 50, cursor: 'invalid' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.listEvents.mock.calls).toHaveLength(0);
+
+    jest.spyOn(repository, 'findById').mockResolvedValue(null);
+    await expect(
+      service.listEvents(incident.id, { limit: 50 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(repository.listEvents.mock.calls).toHaveLength(0);
   });
 
   it('rejects a whitespace-only title before opening a transaction', async () => {

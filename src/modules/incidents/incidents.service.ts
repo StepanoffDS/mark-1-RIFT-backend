@@ -1,6 +1,7 @@
 import { DatabaseService } from '@infrastructure/database/database.service';
 import { buildChangePayload } from '@libs/buildChangePayload';
 import { buildUpdateChanges } from '@libs/buildUpdateChanges';
+import { decodeCursor, encodeCursor } from '@libs/cursor-pagination';
 import {
   BadRequestException,
   Injectable,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/common';
 
 import { CreateIncidentDto } from './dto/create-incident.dto';
+import { ListIncidentEventsQueryDto } from './dto/list-incident-events-query.dto';
 import { ListIncidentsQueryDto } from './dto/list-incidents-query.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
 import { IncidentsRepository } from './incidents.repository';
@@ -22,6 +24,61 @@ export class IncidentsService {
 
   list(query: ListIncidentsQueryDto) {
     return this.incidentsRepository.list(query);
+  }
+
+  async listEvents(incidentId: string, query: ListIncidentEventsQueryDto) {
+    if (!(await this.incidentsRepository.findById(incidentId))) {
+      throw new NotFoundException('Incident not found');
+    }
+
+    const cursor = query.cursor
+      ? decodeCursor(
+          query.cursor,
+          (payload) => this.parseEventCursor(payload),
+          'Invalid event cursor',
+        )
+      : undefined;
+    const rows = await this.incidentsRepository.listEvents(
+      incidentId,
+      query.limit,
+      cursor,
+    );
+    const hasMore = rows.length > query.limit;
+    const items = rows.slice(0, query.limit).map((event) => ({
+      type: event.type,
+      actor: event.actor_id
+        ? { id: event.actor_id, username: event.actor_username }
+        : null,
+      payload: event.payload,
+      createdAt: event.created_at,
+    }));
+    const last = rows[query.limit - 1];
+
+    return {
+      items,
+      nextCursor:
+        hasMore && last
+          ? encodeCursor({ createdAt: last.created_at, id: last.id })
+          : null,
+    };
+  }
+
+  private parseEventCursor(payload: unknown) {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('createdAt' in payload) ||
+      !('id' in payload) ||
+      typeof payload.createdAt !== 'string' ||
+      Number.isNaN(Date.parse(payload.createdAt)) ||
+      typeof payload.id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        payload.id,
+      )
+    ) {
+      throw new Error();
+    }
+    return { createdAt: payload.createdAt, id: payload.id };
   }
 
   async create(dto: CreateIncidentDto, actorId: string) {
