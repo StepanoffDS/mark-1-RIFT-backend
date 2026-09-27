@@ -67,7 +67,7 @@ export class IncidentsService {
   async update(id: string, dto: UpdateIncidentDto, actorId: string) {
     const changes = this.normalizeChanges(dto);
 
-    if (!changes.title) {
+    if (changes.title !== undefined && !changes.title) {
       throw new BadRequestException('Title cannot be empty');
     }
 
@@ -180,6 +180,7 @@ export class IncidentsService {
     const changes = buildUpdateChanges<UpdateIncidentDto, IncidentChanges>(
       dto,
       {
+        title: ({ title }) => title,
         description: ({ description }) => description,
         severity: ({ severity }) => severity,
       },
