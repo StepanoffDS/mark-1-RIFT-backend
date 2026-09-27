@@ -7,6 +7,12 @@
   },
   "testEnvironment": "node",
   "moduleNameMapper": {
+    "^@config/(.*)$": "<rootDir>/src/config/$1",
+    "^@infrastructure/(.*)$": "<rootDir>/src/infrastructure/$1",
+    "^@libs/(.*)$": "<rootDir>/src/libs/$1",
+    "^@modules/(.*)$": "<rootDir>/src/modules/$1",
+    "^@scripts/(.*)$": "<rootDir>/src/scripts/$1",
+    "^@src/(.*)$": "<rootDir>/$1",
     "^src/(.*)$": "<rootDir>/src/$1"
   }
 }
